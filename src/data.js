@@ -1,26 +1,31 @@
-// Device presets. Sizes are design-time preview pixels (not real device px),
-// tuned so every device reads at a comparable, legible scale on screen.
+// Device presets.
+//
+// `vw`/`vh` are the device's REAL CSS-pixel viewport — the iframe is rendered
+// at exactly these dimensions so the previewed site sees the same viewport
+// width (and therefore hits the same media queries) as the real hardware.
+// `radius`, `bezel` and `chin` are likewise in real device px, so the whole
+// mockup can be uniformly scaled down to fit the canvas without distortion.
 export const DEVICES = [
   // ---------------- iPhone ----------------
-  { id: 'iphone-17-pro-max', name: 'iPhone 17 Pro Max', category: 'iPhone', res: '440 × 956', w: 300, h: 624, radius: 54, bezel: 9, cutout: 'island', edge: 'flat' },
-  { id: 'iphone-17-pro', name: 'iPhone 17 Pro', category: 'iPhone', res: '402 × 874', w: 284, h: 600, radius: 50, bezel: 9, cutout: 'island', edge: 'flat' },
-  { id: 'iphone-17', name: 'iPhone 17', category: 'iPhone', res: '393 × 852', w: 272, h: 588, radius: 46, bezel: 8, cutout: 'island', edge: 'flat' },
-  { id: 'iphone-se', name: 'iPhone SE', category: 'iPhone', res: '375 × 667', w: 252, h: 546, radius: 30, bezel: 14, cutout: 'home', edge: 'flat' },
+  { id: 'iphone-17-pro-max', name: 'iPhone 17 Pro Max', category: 'iPhone', vw: 440, vh: 956, radius: 62, bezel: 13, cutout: 'island', edge: 'flat' },
+  { id: 'iphone-17-pro', name: 'iPhone 17 Pro', category: 'iPhone', vw: 402, vh: 874, radius: 58, bezel: 13, cutout: 'island', edge: 'flat' },
+  { id: 'iphone-17', name: 'iPhone 17', category: 'iPhone', vw: 393, vh: 852, radius: 55, bezel: 12, cutout: 'island', edge: 'flat' },
+  { id: 'iphone-se', name: 'iPhone SE', category: 'iPhone', vw: 375, vh: 667, radius: 42, bezel: 16, chin: 78, cutout: 'home', edge: 'flat' },
 
   // ---------------- Samsung ----------------
-  { id: 'galaxy-s26-ultra', name: 'Galaxy S26 Ultra', category: 'Samsung', res: '480 × 1040', w: 300, h: 634, radius: 38, bezel: 6, cutout: 'punch-center', edge: 'curved' },
-  { id: 'galaxy-s26-plus', name: 'Galaxy S26+', category: 'Samsung', res: '440 × 956', w: 288, h: 606, radius: 34, bezel: 6, cutout: 'punch-center', edge: 'curved' },
-  { id: 'galaxy-s26', name: 'Galaxy S26', category: 'Samsung', res: '402 × 874', w: 272, h: 574, radius: 30, bezel: 7, cutout: 'punch-center', edge: 'flat' },
-  { id: 'galaxy-z-fold-7', name: 'Galaxy Z Fold 7', category: 'Samsung', res: '374 × 840', w: 232, h: 580, radius: 26, bezel: 7, cutout: 'punch-corner', edge: 'flat' },
+  { id: 'galaxy-s26-ultra', name: 'Galaxy S26 Ultra', category: 'Samsung', vw: 480, vh: 1040, radius: 46, bezel: 9, cutout: 'punch-center', edge: 'curved' },
+  { id: 'galaxy-s26-plus', name: 'Galaxy S26+', category: 'Samsung', vw: 440, vh: 956, radius: 44, bezel: 9, cutout: 'punch-center', edge: 'curved' },
+  { id: 'galaxy-s26', name: 'Galaxy S26', category: 'Samsung', vw: 402, vh: 874, radius: 40, bezel: 10, cutout: 'punch-center', edge: 'flat' },
+  { id: 'galaxy-z-fold-7', name: 'Galaxy Z Fold 7', category: 'Samsung', vw: 374, vh: 840, radius: 34, bezel: 10, cutout: 'punch-corner', edge: 'flat' },
 
   // ---------------- Pixel ----------------
-  { id: 'pixel-10-pro-xl', name: 'Pixel 10 Pro XL', category: 'Pixel', res: '430 × 962', w: 296, h: 622, radius: 44, bezel: 8, cutout: 'punch-center', edge: 'flat' },
-  { id: 'pixel-10-pro', name: 'Pixel 10 Pro', category: 'Pixel', res: '412 × 892', w: 284, h: 598, radius: 42, bezel: 8, cutout: 'punch-center', edge: 'flat' },
-  { id: 'pixel-10', name: 'Pixel 10', category: 'Pixel', res: '393 × 852', w: 272, h: 574, radius: 38, bezel: 9, cutout: 'punch-center', edge: 'flat' },
+  { id: 'pixel-10-pro-xl', name: 'Pixel 10 Pro XL', category: 'Pixel', vw: 430, vh: 962, radius: 56, bezel: 11, cutout: 'punch-center', edge: 'flat' },
+  { id: 'pixel-10-pro', name: 'Pixel 10 Pro', category: 'Pixel', vw: 412, vh: 892, radius: 52, bezel: 11, cutout: 'punch-center', edge: 'flat' },
+  { id: 'pixel-10', name: 'Pixel 10', category: 'Pixel', vw: 393, vh: 852, radius: 48, bezel: 12, cutout: 'punch-center', edge: 'flat' },
 
-  // ---------------- iPad ----------------
-  { id: 'ipad-pro-13', name: 'iPad Pro 13"', category: 'iPad', res: '1024 × 1366', w: 640, h: 462, radius: 26, bezel: 16, cutout: 'none', edge: 'flat', orientation: 'landscape', cameraInBezel: true },
-  { id: 'ipad-air-11', name: 'iPad Air 11"', category: 'iPad', res: '820 × 1180', w: 580, h: 420, radius: 22, bezel: 18, cutout: 'none', edge: 'flat', orientation: 'landscape', cameraInBezel: true },
+  // ---------------- iPad (landscape) ----------------
+  { id: 'ipad-pro-13', name: 'iPad Pro 13"', category: 'iPad', vw: 1366, vh: 1024, radius: 34, bezel: 26, cutout: 'none', edge: 'flat', orientation: 'landscape', cameraInBezel: true },
+  { id: 'ipad-air-11', name: 'iPad Air 11"', category: 'iPad', vw: 1180, vh: 820, radius: 30, bezel: 28, cutout: 'none', edge: 'flat', orientation: 'landscape', cameraInBezel: true },
 ]
 
 export const CATEGORIES = ['All', 'iPhone', 'Samsung', 'Pixel', 'iPad']

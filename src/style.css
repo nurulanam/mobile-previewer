@@ -48,6 +48,20 @@
 }
 
 /* ---------------------------------------------------------------- */
+/*  Device frame scaling                                              */
+/* ---------------------------------------------------------------- */
+
+/* The frame is authored at full device resolution and scaled to fit, so
+   the wrapper mirrors the scaled box (transforms don't affect layout). */
+#device-frame {
+  transition: width 0.2s ease-out, height 0.2s ease-out;
+}
+
+#device-frame > div {
+  transition: transform 0.2s ease-out;
+}
+
+/* ---------------------------------------------------------------- */
 /*  Misc UI animations                                                */
 /* ---------------------------------------------------------------- */
 

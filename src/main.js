@@ -15,8 +15,11 @@ const state = {
   browserId: 'safari',
   zoom: 100,
   browserMenuOpen: false,
+  currentUrl: '',
   saved: loadSaved(),
 }
+
+let loadStallTimer = null
 
 function loadSaved() {
   try {
@@ -75,24 +78,30 @@ function cacheEls() {
 /*  Device frame rendering                                             */
 /* ------------------------------------------------------------------ */
 
+// Every dimension below is expressed in REAL device pixels. The whole frame
+// is scaled as a single unit at render time, so these never need adjusting
+// per zoom level.
+
 function cutoutHTML(device) {
   switch (device.cutout) {
     case 'island':
-      return `<div class="absolute left-1/2 top-3 h-6 w-28 -translate-x-1/2 rounded-full bg-black"></div>`
+      return `<div class="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style="top:14px;width:125px;height:37px;"></div>`
     case 'punch-center':
-      return `<div class="absolute left-1/2 top-3 h-3 w-3 -translate-x-1/2 rounded-full bg-black ring-2 ring-black/40"></div>`
+      return `<div class="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style="top:14px;width:13px;height:13px;box-shadow:0 0 0 2px rgba(0,0,0,.45);"></div>`
     case 'punch-corner':
-      return `<div class="absolute right-5 top-3 h-3 w-3 rounded-full bg-black ring-2 ring-black/40"></div>`
-    case 'home':
-      // Speaker + camera sit in the top bezel (border band), the Touch ID
-      // button sits in the thicker bottom "chin" — both outside the screen.
+      return `<div class="absolute rounded-full bg-black" style="top:16px;right:26px;width:13px;height:13px;box-shadow:0 0 0 2px rgba(0,0,0,.45);"></div>`
+    case 'home': {
+      // Speaker + camera sit in the top bezel band; the Touch ID button sits
+      // in the thick bottom chin — both outside the screen area.
+      const chin = device.chin ?? device.bezel
       return `
-        <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-2.5" style="top:-9px;">
-          <span class="h-[3px] w-8 rounded-full bg-black/40"></span>
-          <span class="h-1.5 w-1.5 rounded-full bg-black/40"></span>
+        <div class="absolute left-1/2 flex -translate-x-1/2 items-center" style="top:-${Math.round(device.bezel / 2 + 3)}px;gap:10px;">
+          <span class="rounded-full bg-black/40" style="width:56px;height:5px;"></span>
+          <span class="rounded-full bg-black/40" style="width:7px;height:7px;"></span>
         </div>
-        <div class="absolute left-1/2 -translate-x-1/2 rounded-full border-[2.5px] border-black/45" style="bottom:-41px;height:32px;width:32px;"></div>
+        <div class="absolute left-1/2 -translate-x-1/2 rounded-full" style="bottom:-${Math.round(chin / 2 + 26)}px;width:52px;height:52px;border:3px solid rgba(0,0,0,.45);"></div>
       `
+    }
     default:
       return ''
   }
@@ -100,29 +109,29 @@ function cutoutHTML(device) {
 
 function homeIndicatorHTML(device) {
   if (device.cutout === 'home') return '' // physical home button already present
-  const width = device.orientation === 'landscape' ? 'w-32' : 'w-24'
-  return `<div class="pointer-events-none absolute bottom-1.5 left-1/2 z-10 h-1 ${width} -translate-x-1/2 rounded-full bg-black/60 dark:bg-white/80"></div>`
+  const w = device.orientation === 'landscape' ? 320 : 140
+  return `<div class="pointer-events-none absolute left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/60 dark:bg-white/80" style="bottom:8px;width:${w}px;height:5px;"></div>`
 }
 
 function curvedEdgeHTML() {
   return `
-    <div class="pointer-events-none absolute inset-y-0 left-0 w-3 bg-gradient-to-r from-black/25 to-transparent"></div>
-    <div class="pointer-events-none absolute inset-y-0 right-0 w-3 bg-gradient-to-l from-black/25 to-transparent"></div>
+    <div class="pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-black/25 to-transparent" style="width:16px;"></div>
+    <div class="pointer-events-none absolute inset-y-0 right-0 bg-gradient-to-l from-black/25 to-transparent" style="width:16px;"></div>
   `
 }
 
 function sideButtonsHTML(device) {
   if (device.orientation === 'landscape') {
     return `
-      <div class="absolute -top-[9px] right-16 h-[3px] w-10 rounded-full bg-black/30"></div>
-      <div class="absolute -top-[9px] right-28 h-[3px] w-6 rounded-full bg-black/30"></div>
+      <div class="absolute rounded-full bg-black/30" style="top:-4px;right:120px;width:70px;height:4px;"></div>
+      <div class="absolute rounded-full bg-black/30" style="top:-4px;right:230px;width:44px;height:4px;"></div>
     `
   }
   return `
-    <div class="absolute -left-[9px] top-[14%] h-7 w-[3px] rounded-full bg-black/30"></div>
-    <div class="absolute -left-[9px] top-[22%] h-12 w-[3px] rounded-full bg-black/30"></div>
-    <div class="absolute -left-[9px] top-[34%] h-12 w-[3px] rounded-full bg-black/30"></div>
-    <div class="absolute -right-[9px] top-[24%] h-16 w-[3px] rounded-full bg-black/30"></div>
+    <div class="absolute rounded-full bg-black/30" style="left:-4px;top:14%;width:4px;height:34px;"></div>
+    <div class="absolute rounded-full bg-black/30" style="left:-4px;top:22%;width:4px;height:64px;"></div>
+    <div class="absolute rounded-full bg-black/30" style="left:-4px;top:34%;width:4px;height:64px;"></div>
+    <div class="absolute rounded-full bg-black/30" style="right:-4px;top:24%;width:4px;height:92px;"></div>
   `
 }
 
@@ -133,37 +142,38 @@ function bottomBarHTML(browser) {
     ? 'bg-white/10 text-slate-200'
     : 'bg-slate-200/70 text-slate-600 dark:bg-white/10 dark:text-slate-200'
   return `
-    <div class="order-last shrink-0 border-t border-slate-200/70 ${wrapTone} px-3 pb-4 pt-2 backdrop-blur dark:border-white/10">
-      <div class="mb-2 flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 ${barTone}">
-        <svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">${LOCK_ICON_PATH}</svg>
-        <span id="browser-url-text" class="flex-1 truncate text-center text-[11px] font-medium">example.com</span>
-        <span class="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full">${browserLogoHTML(browser.id, 'bottom')}</span>
+    <div class="order-last shrink-0 border-t border-slate-200/70 ${wrapTone} backdrop-blur dark:border-white/10" style="padding:8px 16px 26px;">
+      <div class="flex items-center ${barTone}" style="gap:6px;border-radius:12px;padding:9px 12px;margin-bottom:10px;">
+        <svg style="width:14px;height:14px;flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">${LOCK_ICON_PATH}</svg>
+        <span id="browser-url-text" class="flex-1 truncate text-center font-medium" style="font-size:15px;">example.com</span>
+        <span class="shrink-0 overflow-hidden rounded-full" style="width:16px;height:16px;">${browserLogoHTML(browser.id, 'bottom')}</span>
       </div>
-      <div class="flex items-center justify-between px-1 text-slate-400 dark:text-slate-500">
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m9 5 7 7-7 7" /></svg>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M4.5 6.75h15M4.5 12h15M4.5 17.25h15" /></svg>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="4.5" y="4.5" width="15" height="15" rx="3.5" /></svg>
+      <div class="flex items-center justify-between text-slate-400 dark:text-slate-500" style="padding:0 6px;">
+        <svg style="width:22px;height:22px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+        <svg style="width:22px;height:22px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m9 5 7 7-7 7" /></svg>
+        <svg style="width:22px;height:22px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>
+        <svg style="width:22px;height:22px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M4.5 6.75h15M4.5 12h15M4.5 17.25h15" /></svg>
+        <svg style="width:22px;height:22px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="4.5" y="4.5" width="15" height="15" rx="3.5" /></svg>
       </div>
     </div>
   `
 }
 
-/** Android Chrome-style top toolbar: address bar with menu button. */
-function topBarHTML(browser) {
+/** Android Chrome-style top toolbar: address bar with overflow menu. */
+function topBarHTML(browser, device) {
   const barTone = browser.dark
     ? 'bg-white/10 text-slate-200'
     : 'bg-slate-200/70 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
   const wrapTone = browser.dark ? 'bg-neutral-900' : 'bg-slate-50 dark:bg-slate-900'
+  const h = device.category === 'iPad' ? 64 : 56
   return `
-    <div class="order-first flex h-11 shrink-0 items-center gap-2 border-b border-slate-200/70 ${wrapTone} px-3 pt-1.5 dark:border-slate-800">
-      <span class="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full">${browserLogoHTML(browser.id, 'top')}</span>
-      <div class="flex flex-1 items-center gap-1.5 px-2 py-1 ${browser.bar} ${barTone}">
-        <svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">${LOCK_ICON_PATH}</svg>
-        <span id="browser-url-text" class="truncate text-[11px] font-medium">example.com</span>
+    <div class="order-first flex shrink-0 items-center border-b border-slate-200/70 ${wrapTone} dark:border-slate-800" style="height:${h}px;gap:10px;padding:6px 14px 0;">
+      <span class="shrink-0 overflow-hidden rounded-full" style="width:18px;height:18px;">${browserLogoHTML(browser.id, 'top')}</span>
+      <div class="flex flex-1 items-center ${browser.bar} ${barTone}" style="gap:7px;padding:8px 12px;">
+        <svg style="width:14px;height:14px;flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">${LOCK_ICON_PATH}</svg>
+        <span id="browser-url-text" class="truncate font-medium" style="font-size:15px;">example.com</span>
       </div>
-      <svg class="h-3.5 w-3.5 shrink-0 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5.5" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="12" cy="18.5" r="1.2" /></svg>
+      <svg class="shrink-0 opacity-60" style="width:18px;height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5.5" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="12" cy="18.5" r="1.2" /></svg>
     </div>
   `
 }
@@ -171,60 +181,194 @@ function topBarHTML(browser) {
 function browserChromeHTML(browser, device) {
   // Real-world convention: iOS Safari/Chrome keep the address bar docked at
   // the bottom; Android + iPadOS browsers keep it pinned to the top.
-  return device.category === 'iPhone' ? bottomBarHTML(browser) : topBarHTML(browser)
+  return device.category === 'iPhone' ? bottomBarHTML(browser) : topBarHTML(browser, device)
 }
 
-function pagePlaceholderHTML() {
+function previewAreaHTML() {
   return `
-    <div class="order-none flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gradient-to-b from-white to-slate-50 px-6 text-center dark:from-neutral-950 dark:to-neutral-900">
-      <div class="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-500 dark:bg-indigo-500/10">
-        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3s4.5 4.03 4.5 9-2.015 9-4.5 9ZM3.5 9h17M3.5 15h17" /></svg>
+    <div class="relative order-none min-h-0 flex-1 overflow-hidden bg-white dark:bg-neutral-950">
+      <iframe
+        id="preview-iframe"
+        title="Website preview"
+        referrerpolicy="no-referrer"
+        class="h-full w-full border-0 ${state.currentUrl ? '' : 'hidden'}"
+        ${state.currentUrl ? `src="${state.currentUrl}"` : ''}
+      ></iframe>
+
+      <div id="preview-empty" class="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-white to-slate-50 text-center dark:from-neutral-950 dark:to-neutral-900 ${state.currentUrl ? 'hidden' : ''}" style="gap:16px;padding:0 32px;">
+        <div class="grid place-items-center rounded-3xl bg-indigo-50 text-indigo-500 dark:bg-indigo-500/10" style="width:72px;height:72px;">
+          <svg style="width:36px;height:36px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3s4.5 4.03 4.5 9-2.015 9-4.5 9ZM3.5 9h17M3.5 15h17" /></svg>
+        </div>
+        <p class="font-medium text-slate-600 dark:text-slate-300" style="font-size:19px;">Paste a URL above to preview it here</p>
+        <p class="text-slate-400 dark:text-slate-500" style="font-size:15px;">Live rendering will appear inside this frame</p>
       </div>
-      <p class="text-sm font-medium text-slate-600 dark:text-slate-300">Paste a URL above to preview it here</p>
-      <p class="text-xs text-slate-400 dark:text-slate-500">Live rendering will appear inside this frame</p>
+
+      <div id="preview-loading" class="pointer-events-none absolute inset-0 hidden items-center justify-center bg-white/70 backdrop-blur-sm dark:bg-neutral-950/70">
+        <div class="animate-spin rounded-full border-indigo-500 border-t-transparent" style="width:44px;height:44px;border-width:3px;border-style:solid;"></div>
+      </div>
+
+      <div id="preview-stalled" class="pointer-events-none absolute hidden items-center justify-between bg-slate-900/90 text-white shadow-lg dark:bg-black/85" style="left:12px;right:12px;bottom:12px;gap:10px;border-radius:10px;padding:10px 14px;font-size:14px;line-height:1.3;">
+        <span>Taking a while — this site may block embedded previews</span>
+        <a id="preview-open-external" class="pointer-events-auto shrink-0 font-semibold underline" target="_blank" rel="noopener noreferrer">Open ↗</a>
+      </div>
     </div>
   `
+}
+
+function wirePreviewIframe() {
+  clearTimeout(loadStallTimer)
+
+  const iframe = $('#preview-iframe')
+  const loading = $('#preview-loading')
+  const stalled = $('#preview-stalled')
+  const openExternal = $('#preview-open-external')
+  if (!iframe) return
+
+  if (openExternal) openExternal.href = state.currentUrl || '#'
+  if (!state.currentUrl) return
+
+  loading.classList.remove('hidden')
+  loading.classList.add('flex')
+  stalled.classList.add('hidden')
+  stalled.classList.remove('flex')
+
+  iframe.addEventListener(
+    'load',
+    () => {
+      loading.classList.add('hidden')
+      loading.classList.remove('flex')
+      stalled.classList.add('hidden')
+      stalled.classList.remove('flex')
+      clearTimeout(loadStallTimer)
+    },
+    { once: true }
+  )
+
+  loadStallTimer = setTimeout(() => {
+    stalled.classList.remove('hidden')
+    stalled.classList.add('flex')
+  }, 6000)
+}
+
+/** Outer frame dimensions (screen + bezels) in real device px. */
+function frameSize(device) {
+  const chin = device.chin ?? device.bezel
+  return {
+    chin,
+    w: device.vw + device.bezel * 2,
+    h: device.vh + device.bezel + chin,
+  }
+}
+
+/**
+ * Scale needed to fit the full-size mockup into the canvas. Zoom is applied
+ * on top of this, so "100%" means "fit to canvas" rather than 1 device px
+ * to 1 screen px — a 956px-tall phone would never fit otherwise.
+ */
+function computeFitScale(device) {
+  const { w, h } = frameSize(device)
+  const PADDING = 64 // canvas p-8 on both sides
+  const LABEL = 44 // caption below the device
+  const TOOLBAR = 76 // floating toolbar hovering over the canvas bottom
+  const availW = (els.canvasArea?.clientWidth ?? 800) - PADDING
+  const availH = (els.canvasArea?.clientHeight ?? 600) - PADDING - LABEL - TOOLBAR
+  return Math.min(availW / w, availH / h, 1)
+}
+
+function updateDeviceLabel() {
+  const device = getDevice()
+  const skin = getSkin()
+  els.deviceLabel.textContent = `${device.name} · ${device.vw} × ${device.vh} · ${skin.name} · ${state.zoom}%`
+}
+
+/** Position and scale the frame; also sizes the stage so centring stays right. */
+function applyZoom() {
+  const device = getDevice()
+  const { w, h } = frameSize(device)
+  const scale = computeFitScale(device) * (state.zoom / 100)
+
+  const frameEl = els.deviceFrame.firstElementChild
+  if (frameEl) {
+    frameEl.style.transform = `scale(${scale})`
+    frameEl.style.transformOrigin = 'top left'
+  }
+  // Transforms don't affect layout, so mirror the scaled box onto the wrapper.
+  els.deviceFrame.style.width = `${w * scale}px`
+  els.deviceFrame.style.height = `${h * scale}px`
+
+  updateDeviceLabel()
+}
+
+/** Cheap re-skin: recolor the existing frame without reloading the preview. */
+function applySkinOnly() {
+  const skin = getSkin()
+  const frameEl = els.deviceFrame.firstElementChild
+  if (frameEl) {
+    frameEl.style.borderColor = skin.color
+    frameEl.style.background = skin.color
+  }
+  updateDeviceLabel()
 }
 
 function renderDeviceFrame() {
   const device = getDevice()
   const skin = getSkin()
   const browser = getBrowser()
+  const { chin, w, h } = frameSize(device)
   const innerRadius = Math.max(device.radius - device.bezel, 4)
-  const isHomeButton = device.cutout === 'home'
 
-  // iPhone SE has a much thicker bottom "chin" to house the physical home
-  // button — every other device keeps a uniform bezel on all sides.
-  const bottomBezel = isHomeButton ? Math.round(device.bezel * 3.5) : device.bezel
-  const borderStyle = `border-style:solid;border-color:${skin.color};border-width:${device.bezel}px ${device.bezel}px ${bottomBezel}px ${device.bezel}px;`
+  // iPhone SE has a much thicker bottom "chin" housing the home button;
+  // every other device keeps a uniform bezel on all four sides.
+  const borderStyle = `border-style:solid;border-color:${skin.color};border-width:${device.bezel}px ${device.bezel}px ${chin}px ${device.bezel}px;`
 
   els.deviceFrame.innerHTML = `
-    <div class="relative shadow-2xl transition-[width,height,border-radius] duration-300 ease-out"
-         style="width:${device.w}px;height:${device.h}px;border-radius:${device.radius}px;${borderStyle}background:${skin.color};">
+    <div class="relative shadow-2xl"
+         style="width:${w}px;height:${h}px;border-radius:${device.radius}px;${borderStyle}background:${skin.color};box-sizing:border-box;">
       ${sideButtonsHTML(device)}
-      <div class="relative flex h-full w-full flex-col overflow-hidden bg-white dark:bg-neutral-950" style="border-radius:${innerRadius}px;">
+      <div class="relative flex flex-col overflow-hidden bg-white dark:bg-neutral-950"
+           style="width:${device.vw}px;height:${device.vh}px;border-radius:${innerRadius}px;">
         ${browserChromeHTML(browser, device)}
-        ${pagePlaceholderHTML()}
+        ${previewAreaHTML()}
         ${device.edge === 'curved' ? curvedEdgeHTML() : ''}
         ${homeIndicatorHTML(device)}
       </div>
       ${cutoutHTML(device)}
-      ${device.cameraInBezel ? `<div class="absolute left-1/2 top-2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-black/50"></div>` : ''}
+      ${device.cameraInBezel ? `<div class="absolute left-1/2 -translate-x-1/2 rounded-full bg-black/50" style="top:-16px;width:8px;height:8px;"></div>` : ''}
     </div>
   `
 
-  els.deviceLabel.textContent = `${device.name} · ${skin.name} · ${state.zoom}%`
-  els.deviceStage.style.transform = `scale(${state.zoom / 100})`
+  applyZoom()
 
-  const url = els.urlInput?.value?.trim()
   const urlText = $('#browser-url-text')
-  if (urlText && url) {
-    try {
-      urlText.textContent = new URL(url).hostname.replace(/^www\./, '')
-    } catch {
-      urlText.textContent = url
+  if (urlText) {
+    if (state.currentUrl) {
+      try {
+        urlText.textContent = new URL(state.currentUrl).hostname.replace(/^www\./, '')
+      } catch {
+        urlText.textContent = state.currentUrl
+      }
+    } else {
+      urlText.textContent = 'example.com'
     }
   }
+
+  wirePreviewIframe()
+}
+
+function normalizeUrl(raw) {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) return ''
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  if (/^[\w-]+(\.[\w-]+)+/.test(trimmed)) return `https://${trimmed}`
+  return `https://${trimmed}`
+}
+
+function loadPreview(rawUrl) {
+  const url = normalizeUrl(rawUrl)
+  if (!url) return
+  state.currentUrl = url
+  if (els.urlInput) els.urlInput.value = url
+  renderDeviceFrame()
 }
 
 /* ------------------------------------------------------------------ */
@@ -260,7 +404,7 @@ function renderDeviceList() {
           ${deviceThumbHTML(device)}
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm ${selected ? 'font-semibold' : 'font-medium text-slate-700 dark:text-slate-200'}">${device.name}</p>
-            <p class="text-xs text-slate-500 dark:text-slate-400">${device.res} · ${cutoutLabel(device)}</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">${device.vw} × ${device.vh} · ${cutoutLabel(device)}</p>
           </div>
           ${selected ? '<svg class="h-4 w-4 shrink-0 text-indigo-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" /></svg>' : ''}
         </button>
@@ -456,7 +600,7 @@ function bindEvents() {
     if (!btn) return
     state.skinId = btn.dataset.skin
     renderSkinGrid()
-    renderDeviceFrame()
+    applySkinOnly() // recolor in place — no need to reload the live preview
   })
 
   els.savedList.addEventListener('click', (e) => {
@@ -521,28 +665,37 @@ function bindEvents() {
     if (e.key === 'Escape') setBrowserMenuOpen(false)
   })
 
-  // Zoom
+  // Zoom — just rescales the stage, the live preview keeps running untouched
   els.zoomOut.addEventListener('click', () => {
     state.zoom = Math.max(50, state.zoom - 10)
     renderZoom()
-    renderDeviceFrame()
+    applyZoom()
   })
   els.zoomIn.addEventListener('click', () => {
     state.zoom = Math.min(150, state.zoom + 10)
     renderZoom()
-    renderDeviceFrame()
+    applyZoom()
   })
 
-  // Reload
+  // Reload — refreshes the loaded page, same-origin or not
   els.reloadBtn.addEventListener('click', () => {
     els.reloadIcon.classList.remove('animate-spin-once')
     void els.reloadIcon.offsetWidth
     els.reloadIcon.classList.add('animate-spin-once')
-    renderDeviceFrame()
+
+    const iframe = $('#preview-iframe')
+    if (!iframe || !state.currentUrl) return
+    try {
+      iframe.contentWindow.location.reload()
+    } catch {
+      const bust = state.currentUrl.includes('?') ? '&' : '?'
+      iframe.src = `${state.currentUrl}${bust}_r=${Math.random().toString(36).slice(2)}`
+    }
+    wirePreviewIframe()
   })
 
-  // Go / URL enter
-  const applyUrl = () => renderDeviceFrame()
+  // Go / URL enter — this is the actual "navigate" action
+  const applyUrl = () => loadPreview(els.urlInput?.value)
   els.goBtn?.addEventListener('click', applyUrl)
   els.urlInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') applyUrl()
@@ -561,6 +714,16 @@ function bindEvents() {
   els.themeToggle.addEventListener('click', () => {
     const isDark = document.documentElement.classList.toggle('dark')
     localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light')
+  })
+
+  // Keep the device fitted when the canvas area changes size
+  let resizeRaf = null
+  window.addEventListener('resize', () => {
+    if (resizeRaf) return
+    resizeRaf = requestAnimationFrame(() => {
+      applyZoom()
+      resizeRaf = null
+    })
   })
 
   bindCanvasGlow()
@@ -582,6 +745,7 @@ function applyStoredTheme() {
 function init() {
   applyStoredTheme()
   cacheEls()
+  state.currentUrl = normalizeUrl(els.urlInput?.value)
   renderTabs()
   renderCategoryPills()
   renderDeviceList()
