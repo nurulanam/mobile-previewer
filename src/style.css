@@ -5,3 +5,61 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
+
+/* ---------------------------------------------------------------- */
+/*  Canvas hover glow — smoothly trails the cursor and colorizes the  */
+/*  dot grid it passes over (no fixed/repeating ping animation).      */
+/* ---------------------------------------------------------------- */
+
+#canvas-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.glow-layer {
+  position: absolute;
+  left: var(--mx, 50%);
+  top: var(--my, 50%);
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  opacity: 0;
+  mix-blend-mode: color;
+  will-change: left, top;
+}
+
+.glow-layer.fast {
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.95), rgba(99, 102, 241, 0) 68%);
+  transition: left 0.35s cubic-bezier(0.22, 1, 0.36, 1), top 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.4s ease;
+}
+
+.glow-layer.slow {
+  width: 480px;
+  height: 480px;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.7), rgba(168, 85, 247, 0) 70%);
+  transition: left 0.75s cubic-bezier(0.22, 1, 0.36, 1), top 0.75s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.55s ease;
+}
+
+#canvas-area.is-hovering .glow-layer {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------- */
+/*  Misc UI animations                                                */
+/* ---------------------------------------------------------------- */
+
+@keyframes spin-once {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-once {
+  animation: spin-once 0.5s ease-in-out;
+}
