@@ -1,5 +1,7 @@
 import './style.css'
 import { DEVICES, CATEGORIES, SKINS, BROWSERS, LOCK_ICON_PATH, browserLogoHTML } from './data.js'
+import { captureScreenshot, startRecording, downloadBlob, captureSupported, recordingSupported } from './capture.js'
+import { attachDragScroll } from './touch.js'
 
 const $ = (sel, ctx = document) => ctx.querySelector(sel)
 const $$ = (sel, ctx = document) => Array.from(ctx.querySelectorAll(sel))
@@ -16,10 +18,14 @@ const state = {
   zoom: 100,
   browserMenuOpen: false,
   currentUrl: '',
+  rotated: false,
+  dragScroll: true,
   saved: loadSaved(),
 }
 
 let loadStallTimer = null
+let dragHandle = null
+let recorder = null
 
 function loadSaved() {
   try {
@@ -32,9 +38,53 @@ function persistSaved() {
   localStorage.setItem(SAVED_KEY, JSON.stringify(state.saved))
 }
 
-const getDevice = () => DEVICES.find((d) => d.id === state.deviceId) ?? DEVICES[0]
+const getBaseDevice = () => DEVICES.find((d) => d.id === state.deviceId) ?? DEVICES[0]
+
+/** The active device, with width/height swapped when rotated. */
+function getDevice() {
+  const base = getBaseDevice()
+  if (!state.rotated) return base
+  return {
+    ...base,
+    vw: base.vh,
+    vh: base.vw,
+    orientation: base.orientation === 'landscape' ? 'portrait' : 'landscape',
+    rotated: true,
+  }
+}
+
 const getSkin = () => SKINS.find((s) => s.id === state.skinId) ?? SKINS[0]
 const getBrowser = () => BROWSERS.find((b) => b.id === state.browserId) ?? BROWSERS[0]
+
+/* ------------------------------------------------------------------ */
+/*  Toasts                                                             */
+/* ------------------------------------------------------------------ */
+
+const TOAST_TONES = {
+  info: 'bg-slate-900 text-white dark:bg-white dark:text-slate-900',
+  success: 'bg-emerald-600 text-white',
+  error: 'bg-rose-600 text-white',
+}
+
+function toast(message, tone = 'info', ms = 3800) {
+  const host = $('#toasts')
+  if (!host) return
+  const el = document.createElement('div')
+  el.className = `pointer-events-auto max-w-sm rounded-xl px-3.5 py-2 text-xs font-medium shadow-lg transition-all duration-200 ${TOAST_TONES[tone] ?? TOAST_TONES.info}`
+  el.style.opacity = '0'
+  el.style.transform = 'translateY(6px)'
+  el.textContent = message
+  host.appendChild(el)
+  requestAnimationFrame(() => {
+    el.style.opacity = '1'
+    el.style.transform = 'translateY(0)'
+  })
+  setTimeout(() => {
+    el.style.opacity = '0'
+    el.style.transform = 'translateY(6px)'
+    setTimeout(() => el.remove(), 220)
+  }, ms)
+}
 
 const els = {}
 
@@ -83,23 +133,43 @@ function cacheEls() {
 // per zoom level.
 
 function cutoutHTML(device) {
+  // Rotating the handset moves the camera housing to what is now the left edge.
+  const rot = device.rotated
   switch (device.cutout) {
     case 'island':
-      return `<div class="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style="top:14px;width:125px;height:37px;"></div>`
+      return rot
+        ? `<div class="absolute top-1/2 -translate-y-1/2 rounded-full bg-black" style="left:14px;width:37px;height:125px;"></div>`
+        : `<div class="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style="top:14px;width:125px;height:37px;"></div>`
     case 'punch-center':
-      return `<div class="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style="top:14px;width:13px;height:13px;box-shadow:0 0 0 2px rgba(0,0,0,.45);"></div>`
+      return rot
+        ? `<div class="absolute top-1/2 -translate-y-1/2 rounded-full bg-black" style="left:14px;width:13px;height:13px;box-shadow:0 0 0 2px rgba(0,0,0,.45);"></div>`
+        : `<div class="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style="top:14px;width:13px;height:13px;box-shadow:0 0 0 2px rgba(0,0,0,.45);"></div>`
     case 'punch-corner':
-      return `<div class="absolute rounded-full bg-black" style="top:16px;right:26px;width:13px;height:13px;box-shadow:0 0 0 2px rgba(0,0,0,.45);"></div>`
+      return rot
+        ? `<div class="absolute rounded-full bg-black" style="bottom:26px;left:16px;width:13px;height:13px;box-shadow:0 0 0 2px rgba(0,0,0,.45);"></div>`
+        : `<div class="absolute rounded-full bg-black" style="top:16px;right:26px;width:13px;height:13px;box-shadow:0 0 0 2px rgba(0,0,0,.45);"></div>`
     case 'home': {
-      // Speaker + camera sit in the top bezel band; the Touch ID button sits
-      // in the thick bottom chin — both outside the screen area.
+      // Speaker + camera sit in the bezel band; the Touch ID button sits in
+      // the thick chin — both outside the screen area. Rotating the handset
+      // moves that chin (and the button) to the right-hand edge.
       const chin = device.chin ?? device.bezel
+      const earOffset = Math.round(device.bezel / 2 + 3)
+      const btnOffset = Math.round(chin / 2 + 26)
+      if (rot) {
+        return `
+          <div class="absolute top-1/2 flex -translate-y-1/2 flex-col items-center" style="left:-${earOffset}px;gap:10px;">
+            <span class="rounded-full bg-black/40" style="width:5px;height:56px;"></span>
+            <span class="rounded-full bg-black/40" style="width:7px;height:7px;"></span>
+          </div>
+          <div class="absolute top-1/2 -translate-y-1/2 rounded-full" style="right:-${btnOffset}px;width:52px;height:52px;border:3px solid rgba(0,0,0,.45);"></div>
+        `
+      }
       return `
-        <div class="absolute left-1/2 flex -translate-x-1/2 items-center" style="top:-${Math.round(device.bezel / 2 + 3)}px;gap:10px;">
+        <div class="absolute left-1/2 flex -translate-x-1/2 items-center" style="top:-${earOffset}px;gap:10px;">
           <span class="rounded-full bg-black/40" style="width:56px;height:5px;"></span>
           <span class="rounded-full bg-black/40" style="width:7px;height:7px;"></span>
         </div>
-        <div class="absolute left-1/2 -translate-x-1/2 rounded-full" style="bottom:-${Math.round(chin / 2 + 26)}px;width:52px;height:52px;border:3px solid rgba(0,0,0,.45);"></div>
+        <div class="absolute left-1/2 -translate-x-1/2 rounded-full" style="bottom:-${btnOffset}px;width:52px;height:52px;border:3px solid rgba(0,0,0,.45);"></div>
       `
     }
     default:
@@ -215,8 +285,33 @@ function previewAreaHTML() {
   `
 }
 
+/**
+ * Enable finger-drag scrolling inside the loaded page. Only possible for
+ * same-origin documents — the browser blocks reaching into a cross-origin
+ * iframe, so we surface that instead of failing silently.
+ */
+let crossOriginNoticeShown = false
+
+function setupDragScroll(iframe) {
+  dragHandle?.detach()
+  dragHandle = null
+  if (!state.dragScroll) return
+
+  const result = attachDragScroll(iframe)
+  if (result.ok) {
+    dragHandle = result
+    return
+  }
+  if (result.reason === 'cross-origin' && !crossOriginNoticeShown) {
+    crossOriginNoticeShown = true
+    toast('Drag scrolling needs a same-origin page. Use your wheel or trackpad to scroll this site.', 'info', 5200)
+  }
+}
+
 function wirePreviewIframe() {
   clearTimeout(loadStallTimer)
+  dragHandle?.detach()
+  dragHandle = null
 
   const iframe = $('#preview-iframe')
   const loading = $('#preview-loading')
@@ -240,6 +335,7 @@ function wirePreviewIframe() {
       stalled.classList.add('hidden')
       stalled.classList.remove('flex')
       clearTimeout(loadStallTimer)
+      setupDragScroll(iframe)
     },
     { once: true }
   )
@@ -253,10 +349,12 @@ function wirePreviewIframe() {
 /** Outer frame dimensions (screen + bezels) in real device px. */
 function frameSize(device) {
   const chin = device.chin ?? device.bezel
+  const chinOnSide = device.rotated && !!device.chin
   return {
     chin,
-    w: device.vw + device.bezel * 2,
-    h: device.vh + device.bezel + chin,
+    chinOnSide,
+    w: device.vw + device.bezel + (chinOnSide ? chin : device.bezel),
+    h: device.vh + device.bezel + (chinOnSide ? device.bezel : chin),
   }
 }
 
@@ -314,12 +412,15 @@ function renderDeviceFrame() {
   const device = getDevice()
   const skin = getSkin()
   const browser = getBrowser()
-  const { chin, w, h } = frameSize(device)
+  const { chin, chinOnSide, w, h } = frameSize(device)
   const innerRadius = Math.max(device.radius - device.bezel, 4)
 
-  // iPhone SE has a much thicker bottom "chin" housing the home button;
-  // every other device keeps a uniform bezel on all four sides.
-  const borderStyle = `border-style:solid;border-color:${skin.color};border-width:${device.bezel}px ${device.bezel}px ${chin}px ${device.bezel}px;`
+  // iPhone SE has a much thicker "chin" housing the home button; every other
+  // device keeps a uniform bezel on all four sides. Rotating moves the chin
+  // from the bottom edge to the right edge.
+  const b = device.bezel
+  const borderWidth = chinOnSide ? `${b}px ${chin}px ${b}px ${b}px` : `${b}px ${b}px ${chin}px ${b}px`
+  const borderStyle = `border-style:solid;border-color:${skin.color};border-width:${borderWidth};`
 
   els.deviceFrame.innerHTML = `
     <div class="relative shadow-2xl"
@@ -353,6 +454,130 @@ function renderDeviceFrame() {
   }
 
   wirePreviewIframe()
+}
+
+/* ------------------------------------------------------------------ */
+/*  Capture: screenshot + recording                                    */
+/* ------------------------------------------------------------------ */
+
+/** The element we crop captures to — the physical device frame itself. */
+const captureTarget = () => els.deviceFrame.firstElementChild ?? els.deviceFrame
+
+function captureFilename(ext) {
+  const device = getBaseDevice().name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  let host = 'preview'
+  try {
+    host = new URL(state.currentUrl).hostname.replace(/^www\./, '')
+  } catch {
+    /* no URL loaded yet — keep the generic name */
+  }
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  return `${host}-${device}-${stamp}.${ext}`
+}
+
+/** Hide our own chrome so it can't land in the captured frame. */
+function setCaptureMode(on) {
+  $('#canvas-toolbar')?.classList.toggle('invisible', on)
+  els.canvasArea?.classList.toggle('is-hovering', false)
+}
+
+async function doScreenshot() {
+  if (!captureSupported()) {
+    toast('This browser has no Screen Capture API, so screenshots are unavailable.', 'error')
+    return
+  }
+  setCaptureMode(true)
+  try {
+    const blob = await captureScreenshot(captureTarget())
+    downloadBlob(blob, captureFilename('png'))
+    toast('Screenshot saved', 'success')
+  } catch (err) {
+    if (err?.name === 'NotAllowedError') toast('Screen capture was cancelled', 'info')
+    else toast(`Screenshot failed: ${err?.message ?? err}`, 'error')
+  } finally {
+    setCaptureMode(false)
+  }
+}
+
+function formatElapsed(ms) {
+  const total = Math.floor(ms / 1000)
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
+function setRecordingUI(on) {
+  $('#rec-status')?.classList.toggle('hidden', !on)
+  $('#rec-status')?.classList.toggle('flex', on)
+  $('#rec-icon')?.classList.toggle('animate-pulse', on)
+  const title = $('#rec-card-title')
+  if (title) title.textContent = on ? 'Recording… click to stop' : 'Record scrolling'
+  $('#canvas-toolbar')?.classList.toggle('invisible', on)
+}
+
+async function toggleRecording() {
+  if (recorder) {
+    const handle = recorder
+    recorder = null
+    setRecordingUI(false)
+    try {
+      const blob = await handle.stop()
+      if (blob.size) {
+        downloadBlob(blob, captureFilename(handle.extension))
+        toast('Recording saved', 'success')
+      } else {
+        toast('Recording was empty — nothing saved', 'error')
+      }
+    } catch (err) {
+      toast(`Recording failed: ${err?.message ?? err}`, 'error')
+    }
+    return
+  }
+
+  if (!recordingSupported()) {
+    toast('This browser cannot record — MediaRecorder or Screen Capture is unavailable.', 'error')
+    return
+  }
+
+  try {
+    const handle = await startRecording(captureTarget(), {
+      onTick: (ms) => {
+        const t = $('#rec-time')
+        if (t) t.textContent = formatElapsed(ms)
+      },
+    })
+    recorder = handle
+    setRecordingUI(true)
+    toast('Recording — scroll the preview, then press Stop', 'info')
+  } catch (err) {
+    if (err?.name === 'NotAllowedError') toast('Screen capture was cancelled', 'info')
+    else toast(`Could not start recording: ${err?.message ?? err}`, 'error')
+  }
+}
+
+function toggleRotate() {
+  state.rotated = !state.rotated
+  renderDeviceFrame()
+  const d = getDevice()
+  toast(`${getBaseDevice().name} — ${d.vw} × ${d.vh}`, 'info', 1800)
+}
+
+function toggleDragScroll() {
+  state.dragScroll = !state.dragScroll
+  const btn = $('#drag-toggle')
+  btn?.setAttribute('aria-pressed', String(state.dragScroll))
+  btn?.classList.toggle('bg-indigo-50', state.dragScroll)
+  btn?.classList.toggle('text-indigo-600', state.dragScroll)
+  btn?.classList.toggle('dark:bg-indigo-500/15', state.dragScroll)
+  btn?.classList.toggle('dark:text-indigo-400', state.dragScroll)
+
+  const iframe = $('#preview-iframe')
+  if (state.dragScroll) {
+    if (iframe) setupDragScroll(iframe)
+    toast('Touch drag scrolling on', 'info', 1600)
+  } else {
+    dragHandle?.detach()
+    dragHandle = null
+    toast('Touch drag scrolling off', 'info', 1600)
+  }
 }
 
 function normalizeUrl(raw) {
@@ -716,6 +941,46 @@ function bindEvents() {
     localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light')
   })
 
+  // Capture, rotate, drag-scroll
+  $('#shot-btn')?.addEventListener('click', doScreenshot)
+  $('#shot-card')?.addEventListener('click', doScreenshot)
+  $('#rec-btn')?.addEventListener('click', toggleRecording)
+  $('#rec-card')?.addEventListener('click', toggleRecording)
+  $('#rec-stop')?.addEventListener('click', toggleRecording)
+  $('#rotate-btn')?.addEventListener('click', toggleRotate)
+  $('#drag-toggle')?.addEventListener('click', toggleDragScroll)
+
+  // Keyboard shortcuts (skip while typing in the URL bar)
+  document.addEventListener('keydown', (e) => {
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+    const mod = e.metaKey || e.ctrlKey
+
+    if (mod && e.key.toLowerCase() === 's') {
+      e.preventDefault()
+      doScreenshot()
+      return
+    }
+    if (mod && e.key.toLowerCase() === 'd') {
+      e.preventDefault()
+      els.themeToggle.click()
+      return
+    }
+    if (mod && e.key.toLowerCase() === 'r') {
+      e.preventDefault()
+      els.reloadBtn.click()
+      return
+    }
+    if (typing || mod) return
+
+    if (e.key.toLowerCase() === 'f') {
+      e.preventDefault()
+      els.fullscreenBtn.click()
+    } else if (e.key.toLowerCase() === 'o') {
+      e.preventDefault()
+      toggleRotate()
+    }
+  })
+
   // Keep the device fitted when the canvas area changes size
   let resizeRaf = null
   window.addEventListener('resize', () => {
@@ -755,6 +1020,12 @@ function init() {
   renderZoom()
   renderDeviceFrame()
   bindEvents()
+
+  // Reflect the default-on drag-scroll state in the toolbar button
+  const dragBtn = $('#drag-toggle')
+  if (state.dragScroll && dragBtn) {
+    dragBtn.classList.add('bg-indigo-50', 'text-indigo-600', 'dark:bg-indigo-500/15', 'dark:text-indigo-400')
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init)
