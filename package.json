@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "serve:dist": "vite preview --host --port 4173"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",

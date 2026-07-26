@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: mobile-previewer
+    runtime: static
+    plan: free
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    pullRequestPreviewsEnabled: true
+
+    headers:
+      # Long-lived cache for fingerprinted build assets.
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+      # The HTML shell must always be revalidated so deploys take effect.
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
+
+      # Screenshot + recording rely on getDisplayMedia. It is same-origin by
+      # default, but naming the policy explicitly keeps it working if a
+      # stricter default is ever applied. Do NOT remove `display-capture`.
+      - path: /*
+        name: Permissions-Policy
+        value: display-capture=(self), camera=(), microphone=(), geolocation=()
+
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+      # Stops *this* app from being framed elsewhere. It does not affect the
+      # third-party sites this app embeds in its own preview iframe.
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN

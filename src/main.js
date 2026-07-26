@@ -584,15 +584,41 @@ function normalizeUrl(raw) {
   const trimmed = (raw || '').trim()
   if (!trimmed) return ''
   if (/^https?:\/\//i.test(trimmed)) return trimmed
-  if (/^[\w-]+(\.[\w-]+)+/.test(trimmed)) return `https://${trimmed}`
   return `https://${trimmed}`
+}
+
+/**
+ * A page served over HTTPS cannot embed an http:// frame — the browser blocks
+ * it as mixed content and the iframe just stays blank. That bites as soon as
+ * this is deployed and someone tries to preview a local dev server, so say so
+ * rather than letting it fail silently.
+ */
+function mixedContentWarning(url) {
+  if (window.location.protocol !== 'https:') return null
+  if (!/^http:\/\//i.test(url)) return null
+  const isLocal = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]|[\w-]+\.local)(:|\/|$)/i.test(url)
+  return isLocal
+    ? 'Browsers block http://localhost inside an HTTPS page. Run this previewer locally (npm run dev) to preview a local server.'
+    : 'Browsers block http:// pages inside an HTTPS page. Try the https:// address instead.'
 }
 
 function loadPreview(rawUrl) {
   const url = normalizeUrl(rawUrl)
   if (!url) return
-  state.currentUrl = url
-  if (els.urlInput) els.urlInput.value = url
+
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    toast('That doesn’t look like a valid URL', 'error')
+    return
+  }
+
+  const warning = mixedContentWarning(parsed.href)
+  if (warning) toast(warning, 'error', 7000)
+
+  state.currentUrl = parsed.href
+  if (els.urlInput) els.urlInput.value = parsed.href
   renderDeviceFrame()
 }
 
