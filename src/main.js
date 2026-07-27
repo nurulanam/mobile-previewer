@@ -426,14 +426,14 @@ function renderDeviceFrame() {
     <div class="relative shadow-2xl"
          style="width:${w}px;height:${h}px;border-radius:${device.radius}px;${borderStyle}background:${skin.color};box-sizing:border-box;">
       ${sideButtonsHTML(device)}
-      <div class="relative flex flex-col overflow-hidden bg-white dark:bg-neutral-950"
+      <div id="device-screen" class="relative flex flex-col overflow-hidden bg-white dark:bg-neutral-950"
            style="width:${device.vw}px;height:${device.vh}px;border-radius:${innerRadius}px;">
         ${browserChromeHTML(browser, device)}
         ${previewAreaHTML()}
-        ${device.edge === 'curved' ? curvedEdgeHTML() : ''}
+        ${device.edge === 'curved' ? `<div class="hw-trim">${curvedEdgeHTML()}</div>` : ''}
         ${homeIndicatorHTML(device)}
       </div>
-      ${cutoutHTML(device)}
+      <div class="hw-trim">${cutoutHTML(device)}</div>
       ${device.cameraInBezel ? `<div class="absolute left-1/2 -translate-x-1/2 rounded-full bg-black/50" style="top:-16px;width:8px;height:8px;"></div>` : ''}
     </div>
   `
@@ -460,8 +460,12 @@ function renderDeviceFrame() {
 /*  Capture: screenshot + recording                                    */
 /* ------------------------------------------------------------------ */
 
-/** The element we crop captures to — the physical device frame itself. */
-const captureTarget = () => els.deviceFrame.firstElementChild ?? els.deviceFrame
+/**
+ * Captures cover the screen area only — the bezel, rounded corners and other
+ * hardware trim are deliberately excluded, so the output is a clean rectangle
+ * exactly the device's viewport size.
+ */
+const captureTarget = () => $('#device-screen') ?? els.deviceFrame.firstElementChild ?? els.deviceFrame
 
 function captureFilename(ext) {
   const device = getBaseDevice().name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -475,10 +479,27 @@ function captureFilename(ext) {
   return `${host}-${device}-${stamp}.${ext}`
 }
 
-/** Hide our own chrome so it can't land in the captured frame. */
+/**
+ * Prepare the stage for capture: hide our own toolbar, and square off the
+ * screen's rounded corners. Without that, the corner pixels outside the radius
+ * show the frame colour and the exported image gets dark wedges.
+ */
+/** Let layout and paint settle so the crop target has its final geometry. */
+const settleFrames = () =>
+  new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+
 function setCaptureMode(on) {
   $('#canvas-toolbar')?.classList.toggle('invisible', on)
-  els.canvasArea?.classList.toggle('is-hovering', false)
+  els.canvasArea?.classList.remove('is-hovering')
+
+  const screen = $('#device-screen')
+  if (screen) screen.style.borderRadius = on ? '0px' : ''
+
+  // Physical hardware artefacts — the camera cutout and the curved-glass
+  // shading — don't exist in a real device screenshot, so drop them too.
+  // Software UI (browser chrome, home indicator) stays, because that does
+  // appear in a genuine screenshot.
+  $$('.hw-trim').forEach((el) => el.classList.toggle('hidden', on))
 }
 
 async function doScreenshot() {
@@ -488,15 +509,34 @@ async function doScreenshot() {
   }
   setCaptureMode(true)
   try {
-    const blob = await captureScreenshot(captureTarget())
+    await settleFrames()
+    const device = getDevice()
+    const blob = await captureScreenshot(captureTarget(), {
+      outputWidth: device.vw,
+      outputHeight: device.vh,
+    })
     downloadBlob(blob, captureFilename('png'))
-    toast('Screenshot saved', 'success')
+    toast(`Screenshot saved — ${device.vw} × ${device.vh}`, 'success')
+    noteApproximateCrop()
   } catch (err) {
     if (err?.name === 'NotAllowedError') toast('Screen capture was cancelled', 'info')
     else toast(`Screenshot failed: ${err?.message ?? err}`, 'error')
   } finally {
     setCaptureMode(false)
   }
+}
+
+/**
+ * Region Capture (Chromium) crops to the element exactly. Everywhere else the
+ * crop is worked out from window geometry, which can be a pixel or two off —
+ * say so once rather than letting it look like a rendering bug.
+ */
+let approximateCropNoticeShown = false
+
+function noteApproximateCrop() {
+  if (approximateCropNoticeShown || window.CropTarget?.fromElement) return
+  approximateCropNoticeShown = true
+  toast('Heads up: this browser can’t crop exactly, so the edges may be off by a pixel or two. Chrome or Edge gives an exact crop.', 'info', 6000)
 }
 
 function formatElapsed(ms) {
@@ -510,7 +550,7 @@ function setRecordingUI(on) {
   $('#rec-icon')?.classList.toggle('animate-pulse', on)
   const title = $('#rec-card-title')
   if (title) title.textContent = on ? 'Recording… click to stop' : 'Record scrolling'
-  $('#canvas-toolbar')?.classList.toggle('invisible', on)
+  setCaptureMode(on)
 }
 
 async function toggleRecording() {
@@ -537,8 +577,15 @@ async function toggleRecording() {
     return
   }
 
+  // Square the corners before the stream starts so no frame is recorded with
+  // the rounded mask still applied.
+  setCaptureMode(true)
   try {
+    await settleFrames()
+    const device = getDevice()
     const handle = await startRecording(captureTarget(), {
+      outputWidth: device.vw,
+      outputHeight: device.vh,
       onTick: (ms) => {
         const t = $('#rec-time')
         if (t) t.textContent = formatElapsed(ms)
@@ -546,8 +593,10 @@ async function toggleRecording() {
     })
     recorder = handle
     setRecordingUI(true)
+    noteApproximateCrop()
     toast('Recording — scroll the preview, then press Stop', 'info')
   } catch (err) {
+    setCaptureMode(false)
     if (err?.name === 'NotAllowedError') toast('Screen capture was cancelled', 'info')
     else toast(`Could not start recording: ${err?.message ?? err}`, 'error')
   }

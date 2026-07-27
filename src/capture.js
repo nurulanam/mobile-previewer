@@ -17,11 +17,19 @@ export const recordingSupported = () =>
   captureSupported() && typeof MediaRecorder !== 'undefined' && !!HTMLCanvasElement.prototype.captureStream
 
 async function requestDisplayStream() {
-  return navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: 30, displaySurface: 'browser' },
-    audio: false,
-    preferCurrentTab: true, // Chromium: pre-selects this tab in the picker
-  })
+  // `displaySurface`/`preferCurrentTab` nudge Chromium towards sharing this
+  // tab, which gives the cleanest crop. Firefox has no tab-sharing option and
+  // can reject the constraint outright, so fall back to a plain request.
+  try {
+    return await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 30, displaySurface: 'browser' },
+      audio: false,
+      preferCurrentTab: true,
+    })
+  } catch (err) {
+    if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') throw err
+    return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false })
+  }
 }
 
 function waitForFirstFrame(video, timeout = 10000) {
@@ -69,21 +77,65 @@ async function streamToVideo(stream) {
 }
 
 /**
- * Map an on-page element to its pixel rect within the captured video frame.
- * Only correct when the captured surface is this tab, which is why Region
- * Capture is preferred and this is just the fallback.
+ * Work out where the element sits inside the captured frame.
+ *
+ * Firefox's picker has no "this tab" option, so the surface is a whole window
+ * or monitor and the element has to be located relative to that. Rather than
+ * trusting `displaySurface` (which browsers report inconsistently) we test the
+ * three possible surfaces and keep whichever one the video's dimensions
+ * actually match — the scale factors on both axes agree only for the right one.
  */
-function cropRectFor(el, video) {
+function cropRectFor(el, video, surfaceHint) {
   const r = el.getBoundingClientRect()
-  const sx = video.videoWidth / window.innerWidth
-  const sy = video.videoHeight / window.innerHeight
-  const x = Math.max(0, Math.round(r.left * sx))
-  const y = Math.max(0, Math.round(r.top * sy))
+
+  // Window border thickness and the height of the browser's own chrome,
+  // derived from the gap between the outer window and the content viewport.
+  const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2)
+  const chromeTop = Math.max(0, window.outerHeight - window.innerHeight - borderX)
+
+  const candidates = [
+    { kind: 'browser', w: window.innerWidth, h: window.innerHeight, x: r.left, y: r.top },
+    {
+      kind: 'window',
+      w: window.outerWidth,
+      h: window.outerHeight,
+      x: r.left + borderX,
+      y: r.top + chromeTop,
+    },
+    {
+      kind: 'monitor',
+      w: window.screen.width,
+      h: window.screen.height,
+      x: window.screenX + borderX + r.left,
+      y: window.screenY + chromeTop + r.top,
+    },
+  ]
+
+  let best = null
+  for (const c of candidates) {
+    if (!c.w || !c.h) continue
+    const sx = video.videoWidth / c.w
+    const sy = video.videoHeight / c.h
+    // A correct surface scales identically on both axes.
+    let error = Math.abs(sx - sy) / Math.max(sx, sy)
+    if (surfaceHint && c.kind === surfaceHint) error -= 0.05 // trust the hint as a tie-breaker
+    if (!best || error < best.error) best = { ...c, sx, sy, error }
+  }
+
+  const x = Math.round(best.x * best.sx)
+  const y = Math.round(best.y * best.sy)
+  const w = Math.round(r.width * best.sx)
+  const h = Math.round(r.height * best.sy)
+
+  // Clamp into the frame so a slightly-off estimate still yields a valid crop.
+  const cx = Math.max(0, Math.min(x, video.videoWidth - 1))
+  const cy = Math.max(0, Math.min(y, video.videoHeight - 1))
   return {
-    x,
-    y,
-    w: Math.max(1, Math.min(Math.round(r.width * sx), video.videoWidth - x)),
-    h: Math.max(1, Math.min(Math.round(r.height * sy), video.videoHeight - y)),
+    x: cx,
+    y: cy,
+    w: Math.max(1, Math.min(w, video.videoWidth - cx)),
+    h: Math.max(1, Math.min(h, video.videoHeight - cy)),
+    surface: best.kind,
   }
 }
 
@@ -117,19 +169,13 @@ async function openCroppedStream(targetEl) {
     throw err
   }
 
-  const surface = track.getSettings().displaySurface
-  if (!regionCropped && surface && surface !== 'browser') {
-    video.remove()
-    stopStream(stream)
-    throw new Error('Please choose the "This Tab" option when sharing, so the device frame can be cropped accurately.')
-  }
-
   // With Region Capture the frame *is* the element, so no cropping is needed.
+  // Otherwise (Firefox, Safari) locate the element within the captured surface.
   const rect = regionCropped
-    ? { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight }
-    : cropRectFor(targetEl, video)
+    ? { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight, surface: 'region' }
+    : cropRectFor(targetEl, video, track.getSettings().displaySurface)
 
-  return { stream, video, rect }
+  return { stream, video, rect, exact: regionCropped }
 }
 
 function stopStream(stream) {
@@ -148,17 +194,28 @@ export function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/** Grab a single cropped frame and hand back a PNG blob. */
-export async function captureScreenshot(targetEl) {
+/**
+ * Grab a single cropped frame and hand back a PNG blob.
+ *
+ * Chrome hands back a different capture resolution from run to run, so the
+ * frame is always rescaled to `outputWidth`/`outputHeight` — normally the
+ * device's own viewport — giving a predictable, exactly-sized export.
+ */
+export async function captureScreenshot(targetEl, { outputWidth, outputHeight } = {}) {
   const { stream, video, rect } = await openCroppedStream(targetEl)
   try {
     // Give the compositor a couple of frames so we don't grab a blank one.
     await new Promise((r) => setTimeout(r, 280))
 
+    const outW = Math.max(1, Math.round(outputWidth || rect.w))
+    const outH = Math.max(1, Math.round(outputHeight || rect.h))
+
     const canvas = document.createElement('canvas')
-    canvas.width = rect.w
-    canvas.height = rect.h
-    canvas.getContext('2d').drawImage(video, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h)
+    canvas.width = outW
+    canvas.height = outH
+    const ctx = canvas.getContext('2d')
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(video, rect.x, rect.y, rect.w, rect.h, 0, 0, outW, outH)
 
     return await new Promise((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Encoding the PNG failed'))), 'image/png')
@@ -183,14 +240,18 @@ function pickMimeType() {
  * Record the device frame region. Returns a handle with `stop()` resolving to
  * the finished blob, so the caller controls when recording ends.
  */
-export async function startRecording(targetEl, { onTick } = {}) {
+export async function startRecording(targetEl, { onTick, outputWidth, outputHeight } = {}) {
   const { stream, video, rect } = await openCroppedStream(targetEl)
+
+  const wantW = Math.round(outputWidth || rect.w)
+  const wantH = Math.round(outputHeight || rect.h)
 
   const canvas = document.createElement('canvas')
   // Even dimensions keep VP8/VP9 encoders happy.
-  canvas.width = rect.w - (rect.w % 2)
-  canvas.height = rect.h - (rect.h % 2)
+  canvas.width = Math.max(2, wantW - (wantW % 2))
+  canvas.height = Math.max(2, wantH - (wantH % 2))
   const ctx = canvas.getContext('2d')
+  ctx.imageSmoothingQuality = 'high'
 
   let rafId = null
   const draw = () => {
